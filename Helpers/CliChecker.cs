@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using GitHub.Copilot.SDK;
 
 namespace HelloCopilotSdk.Helpers;
 
@@ -144,32 +145,22 @@ public static class CliChecker
         
         try
         {
-            // Try running a minimal copilot command to check auth
-            using var process = new Process();
-            process.StartInfo = new ProcessStartInfo
-            {
-                FileName = "copilot",
-                Arguments = "--help",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+            // Use the SDK to check authentication status
+            using var client = new CopilotClient();
+            await client.StartAsync();
             
-            process.Start();
-            var stderr = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
+            var authStatus = await client.GetAuthStatusAsync();
             
-            // Check for authentication errors in stderr
-            if (stderr.Contains("not authenticated", StringComparison.OrdinalIgnoreCase) ||
-                stderr.Contains("unauthorized", StringComparison.OrdinalIgnoreCase) ||
-                stderr.Contains("login required", StringComparison.OrdinalIgnoreCase))
+            await client.StopAsync();
+            
+            if (authStatus.IsAuthenticated)
             {
-                return (false, "Not authenticated. Run 'copilot' and type '/login', or set GH_TOKEN environment variable.");
+                return (true, null);
             }
-            
-            // If --help works without auth errors, consider it ready
-            return process.ExitCode == 0 ? (true, null) : (false, "Copilot CLI returned an error.");
+            else
+            {
+                return (false, authStatus.StatusMessage ?? "Not authenticated. Run 'copilot' and type '/login', or set GH_TOKEN environment variable.");
+            }
         }
         catch (Exception ex)
         {

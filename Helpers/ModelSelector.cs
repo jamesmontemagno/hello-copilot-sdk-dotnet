@@ -1,66 +1,31 @@
-using System.Diagnostics;
-using System.Text.RegularExpressions;
+using GitHub.Copilot.SDK;
 
 namespace HelloCopilotSdk.Helpers;
 
 /// <summary>
 /// Handles model selection for the Copilot session.
-/// Fetches available models directly from the Copilot CLI.
+/// Fetches available models from the Copilot SDK.
 /// Based on: https://github.com/jamesmontemagno/podcast-metadata-generator
 /// </summary>
-public static partial class ModelSelector
+public static class ModelSelector
 {
-    [GeneratedRegex("\"([^\"]+)\"")]
-    private static partial Regex QuotedModelRegex();
 
     /// <summary>
-    /// Fetches the list of available models from the Copilot CLI.
-    /// Returns null if the CLI is unavailable or models cannot be parsed.
+    /// Fetches the list of available models from the Copilot SDK.
+    /// Returns null if models cannot be fetched.
     /// </summary>
-    public static async Task<string[]?> GetModelsFromCliAsync()
+    public static async Task<List<ModelInfo>?> GetModelsFromSdkAsync()
     {
         try
         {
-            using var process = new Process();
-            process.StartInfo = new ProcessStartInfo
-            {
-                FileName = "copilot",
-                Arguments = "--help",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+            using var client = new CopilotClient();
+            await client.StartAsync();
             
-            process.Start();
-            var output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
+            var models = await client.ListModelsAsync();
             
-            if (process.ExitCode != 0)
-                return null;
+            await client.StopAsync();
             
-            // Find the --model section and extract choices
-            // The choices can span multiple lines, so we need to find the section
-            var modelIndex = output.IndexOf("--model", StringComparison.OrdinalIgnoreCase);
-            if (modelIndex < 0)
-                return null;
-            
-            var choicesIndex = output.IndexOf("choices:", modelIndex, StringComparison.OrdinalIgnoreCase);
-            if (choicesIndex < 0)
-                return null;
-            
-            // Find the end of the choices (next -- option or end of section)
-            var endIndex = output.IndexOf("\n  --", choicesIndex + 1);
-            if (endIndex < 0)
-                endIndex = output.Length;
-            
-            var choicesSection = output[choicesIndex..endIndex];
-            
-            // Extract all quoted model names using regex
-            var matches = QuotedModelRegex().Matches(choicesSection);
-            var models = matches.Select(m => m.Groups[1].Value).ToArray();
-            
-            return models.Length > 0 ? models : null;
+            return models;
         }
         catch
         {
@@ -75,15 +40,15 @@ public static partial class ModelSelector
     public static async Task<string?> SelectModelAsync()
     {
         Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.WriteLine("   Fetching available models from Copilot CLI...");
+        Console.WriteLine("   Fetching available models from Copilot SDK...");
         Console.ResetColor();
         
-        var models = await GetModelsFromCliAsync();
+        var models = await GetModelsFromSdkAsync();
         
-        if (models == null || models.Length == 0)
+        if (models == null || models.Count == 0)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("❌ Could not fetch models from Copilot CLI.");
+            Console.WriteLine("❌ Could not fetch models from Copilot SDK.");
             Console.WriteLine("   Make sure 'copilot' is installed and working.");
             Console.ResetColor();
             return null;
@@ -93,24 +58,31 @@ public static partial class ModelSelector
         Console.WriteLine("🤖 Select a model:");
         Console.ResetColor();
         
-        for (int i = 0; i < models.Length; i++)
+        for (int i = 0; i < models.Count; i++)
         {
-            Console.WriteLine($"   {i + 1}. {models[i]}");
+            var model = models[i];
+            var multiplierText = model.Billing?.Multiplier != null 
+                ? $" (multiplier: {model.Billing.Multiplier}x)" 
+                : "";
+            Console.WriteLine($"   {i + 1}. {model.Name}{multiplierText}");
         }
         
-        Console.Write($"\nEnter choice (1-{models.Length}) [default: 1]: ");
+        Console.Write($"\nEnter choice (1-{models.Count}) [default: 1]: ");
         var choice = Console.ReadLine()?.Trim();
         
-        if (string.IsNullOrEmpty(choice) || !int.TryParse(choice, out int index) || index < 1 || index > models.Length)
+        if (string.IsNullOrEmpty(choice) || !int.TryParse(choice, out int index) || index < 1 || index > models.Count)
         {
             index = 1;
         }
 
         var selected = models[index - 1];
+        var selectedMultiplierText = selected.Billing?.Multiplier != null 
+            ? $" (multiplier: {selected.Billing.Multiplier}x)" 
+            : "";
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"✅ Selected: {selected}");
+        Console.WriteLine($"✅ Selected: {selected.Name}{selectedMultiplierText}");
         Console.ResetColor();
         
-        return selected;
+        return selected.Id;
     }
 }
